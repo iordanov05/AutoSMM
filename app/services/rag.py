@@ -4,32 +4,28 @@ from app.models.post import Post
 from app.models.group import Group
 from app.models.product import Product
 from app.models.service import Service
-from app.core.db import get_db
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
-from app.core.config import CHROMA_DB_PATH
-from app.core.config import DEEPSEEK_MODEL
-from app.core.config import OPENROUTER_API_KEY
+from app.core.config import CHROMA_DB_PATH, DEEPSEEK_MODEL, OPENROUTER_API_KEY
 
-#  Настройка логирования
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-#  Создаём векторное хранилище ChromaDB
+# Инициализация ChromaDB
 vectorstore = Chroma(
     persist_directory=CHROMA_DB_PATH,
     embedding_function=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 )
-#  Гарантируем, что коллекция ChromaDB инициализирована
 try:
     vectorstore.get()
 except ValueError:
     logger.warning("⚠️ Коллекция ChromaDB не найдена! Пересоздаём...")
     vectorstore.reset_collection()
 
-#  Подключаем OpenRouter (DeepSeek)
+# Подключаем DeepSeek через OpenRouter
 llm = ChatOpenAI(
     openai_api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
@@ -42,7 +38,10 @@ def save_group_data(db: Session, user_id: int, data: dict):
     """
     Сохраняет данные о группе, постах, товарах и услугах в PostgreSQL и ChromaDB.
     """
-    group = db.query(Group).filter(Group.vk_group_id == data["community"]["id"], Group.user_id == user_id).first()
+    group = db.query(Group).filter(
+        Group.vk_group_id == data["community"]["id"],
+        Group.user_id == user_id
+    ).first()
 
     if not group:
         group = Group(
@@ -121,11 +120,9 @@ def save_group_data(db: Session, user_id: int, data: dict):
     Стилизация прошлых постов:
     """ + post_styles
 
-    # Пересоздаём коллекцию перед загрузкой новых данных
     logger.info("🗑️ Удаляем старые данные из ChromaDB...")
     vectorstore.reset_collection()
 
-    # Добавляем новые данные
     document = Document(
         page_content=context_data,
         metadata={"group_id": group.id}
@@ -137,40 +134,39 @@ def save_group_data(db: Session, user_id: int, data: dict):
 
     return {"message": "✅ Данные сохранены в базе"}
 
-
-def generate_post_from_context(db: Session, query: str, group_id: int):
+def generate_post_from_context(db: Session, query: str, group_id: int, history: str = "") -> str:
     """
-    Генерирует пост с учётом стилистики и реальных данных группы.
+    Генерирует пост с учетом (опциональной) истории диалога и данных из ChromaDB.
     """
     retriever = vectorstore.as_retriever()
-    
+
     try:
         results = retriever.invoke(query)
     except ValueError:
-        logger.error("⚠️ Ошибка! ChromaDB не найдена или пустая.")
+        logger.error(f"⚠️ Ошибка! ChromaDB не найдена или пустая для group_id={group_id}.")
         return "Ошибка: нет данных в ChromaDB."
 
-    # Убираем дубликаты данных
     unique_results = list(set([res.page_content for res in results]))
     context_texts = "\n\n".join(unique_results)
 
     prompt = f"""
-    Ты — специалист по маркетингу. Напиши рекламный пост с учётом стилистики прошлых постов и данных о группе.
+    Ты — эксперт по маркетингу. Напиши рекламный пост с учетом прошлых постов, данных о группе и истории общения.
     
-    Данные о группе:
+    🔹 История общения:
+    {history}
+
+    🔹 Данные о группе:
     {context_texts}
 
-    Пользователь хочет: "{query}"
+    🔹 Пользователь хочет: "{query}"
 
-    ❗ Важно: анализируй стиль оформления прошлых постов, используй контактные данные, оформление, хештеги и тон общения.
-    ❗ Если в постах обычно указывают адрес или телефон, добавь их.
+    ❗ Анализируй стиль оформления прошлых постов, используй контактные данные, оформление, хештеги и тон общения.
     ❗ Добавляй только реальные товары и услуги из списка.
     ❗ Пиши пост без команд и пояснений, только сам текст.
     """
 
-    logger.info("📢 Передаём запрос в DeepSeek...")
+    logger.info(f"📢 [group_id={group_id}] Передаём запрос в DeepSeek...")
     logger.debug(f"Запрос:\n{prompt}")
 
     response = llm.invoke(prompt)
-
     return response.content.strip()
