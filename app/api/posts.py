@@ -8,21 +8,21 @@ from app.api.auth import get_current_user
 
 router = APIRouter()
 
-@router.post("/generate")
-def generate_post(
-    user_query: str = Query(..., description="Запрос пользователя для генерации поста"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Генерирует новый пост на основе данных о группе и пожеланий пользователя.
-    """
-    user_group = db.query(Group).filter(Group.user_id == current_user.id).first()
-    if not user_group:
-        raise HTTPException(status_code=404, detail="Группа не найдена")
+# @router.post("/generate")
+# def generate_post(
+#     user_query: str = Query(..., description="Запрос пользователя для генерации поста"),
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_user)
+# ):
+#     """
+#     Генерирует новый пост на основе данных о группе и пожеланий пользователя.
+#     """
+#     user_group = db.query(Group).filter(Group.user_id == current_user.id).first()
+#     if not user_group:
+#         raise HTTPException(status_code=404, detail="Группа не найдена")
 
-    # Генерируем пост без истории (history можно передать пустой строкой)
-    return {"generated_post": generate_post_from_context(db, user_query, user_group.id, history="")}
+#     # Генерируем пост без истории (history можно передать пустой строкой)
+#     return {"generated_post": generate_post_from_context(db, user_query, user_group.id, history="")}
 
 # Вспомогательное хранилище диалогов для WebSocket (в памяти)
 user_sessions = {}

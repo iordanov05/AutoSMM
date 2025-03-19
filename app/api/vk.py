@@ -1,49 +1,29 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from app.core.db import get_db
-from app.services.rag import save_group_data, generate_post_from_context
 from pydantic import BaseModel
 from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from app.services.vk_service import get_community_data
+from app.services.rag import save_group_data
+from app.core.db import get_db
+from app.models.user import User
+from app.api.auth import get_current_user
 
 router = APIRouter()
 
-#  Модели для приёма JSON из ВК
-class PostData(BaseModel):
-    id: int
-    date: str
-    text: str
-    hashtags: List[str]
-    likes: int
-    comments: int
-    reposts: int
 
-class ProductData(BaseModel):
-    id: int
-    name: str
-    description: str
-    price: str
-
-class ServiceData(BaseModel):
-    id: int
-    name: str
-    description: str
-    price: str
-
-class CommunityData(BaseModel):
-    id: int
-    name: str
-    description: str
-    category: str
-    subscribers_count: int
-    sections: List[str]
-
-class VKGroupData(BaseModel):
-    community: CommunityData
-    posts: List[PostData]
-    products: List[ProductData]
-    services: List[ServiceData]
-
-# 📌 Эндпоинт для сохранения данных группы
-@router.post("/save_vk_data")
-def save_vk_data(data: VKGroupData, db: Session = Depends(get_db)):
-    return save_group_data(db, data)
+@router.post("/parse_and_save")
+def parse_and_save_vk(
+    community_link: str = Query(..., description="Ссылка на сообщество ВКонтакте"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Парсит данные сообщества ВКонтакте и сохраняет их в базу.
+    """
+    data = get_community_data(community_link)
+    if not data:
+        raise HTTPException(status_code=400, detail="Не удалось получить данные из сообщества")
+    # Функция сохранения ожидает, что в data["community"] присутствует поле "id"
+    if "id" not in data["community"]:
+        raise HTTPException(status_code=400, detail="Не удалось определить ID сообщества")
+    return save_group_data(db, current_user.id, data)

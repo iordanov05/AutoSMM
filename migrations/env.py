@@ -1,8 +1,8 @@
 from alembic import context
 from sqlalchemy import create_engine, pool
 from logging.config import fileConfig
-from app.core.db import Base  # ✅ Подключаем метаданные моделей
-from app.models.user import User  # ✅ Импортируем все модели
+from app.core.db import Base  # Подключаем метаданные моделей
+from app.models.user import User  # Импортируем все модели
 from app.models.group import Group
 from app.models.post import Post
 from app.core.config import DATABASE_URL

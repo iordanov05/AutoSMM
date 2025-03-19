@@ -23,3 +23,6 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 # Формируем строку подключения
 DATABASE_URL = f"postgresql+psycopg2://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
+# Конфигурация VK API
+ACCESS_TOKEN=os.getenv("ACCESS_TOKEN")
+API_VERSION=os.getenv("API_VERSION")
