@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.models.post import Post
 from app.models.group import Group
@@ -24,11 +25,13 @@ llm = ChatOpenAI(
     max_tokens=3000
 )
 
-
 def save_group_data(db: Session, user_id: int, data: dict):
     """
     Сохраняет данные о группе, постах, товарах и услугах в PostgreSQL и индексирует информацию в ChromaDB.
     """
+    # Получаем текущее время в UTC с учетом таймзоны
+    last_uploaded_at = datetime.now(timezone.utc)
+
     # Проверяем наличие vk_group_id
     vk_group_id = data["community"].get("id")
     if not vk_group_id:
@@ -38,12 +41,13 @@ def save_group_data(db: Session, user_id: int, data: dict):
     # Проверяем, существует ли группа
     group = db.query(Group).filter(Group.vk_group_id == vk_group_id).first()
 
-    # Если группа не существует, создаем новую
+    # Если группы нет — создаем новую
     if not group:
         group = Group(
             vk_group_id=vk_group_id,
             name=data["community"]["name"],
             description=data["community"].get("description"),
+            category=data["community"].get("category"),  # Добавлена категория
             subscribers_count=data["community"].get("subscribers_count"),
         )
         db.add(group)
@@ -56,89 +60,30 @@ def save_group_data(db: Session, user_id: int, data: dict):
         UserGroupAssociation.vk_group_id == vk_group_id
     ).first()
 
+    # Если связи нет, создаем её и обновляем дату
     if not association:
-        association = UserGroupAssociation(user_id=user_id, vk_group_id=vk_group_id)
+        association = UserGroupAssociation(
+            user_id=user_id,
+            vk_group_id=vk_group_id,
+            last_uploaded_at=last_uploaded_at
+        )
         db.add(association)
-        db.commit()
-
-    # Извлекаем уже сохраненные записи, чтобы избежать дублирования
-    existing_posts = {p.text for p in db.query(Post).filter(Post.group_id == vk_group_id).all()}
-    existing_products = {p.name for p in db.query(Product).filter(Product.group_id == vk_group_id).all()}
-    existing_services = {s.name for s in db.query(Service).filter(Service.group_id == vk_group_id).all()}
-
-    # Сохраняем новые посты
-    for post in data["posts"]:
-        if post["text"] not in existing_posts:
-            new_post = Post(
-                group_id=vk_group_id,
-                text=post["text"],
-                likes=post.get("likes", 0),
-                comments=post.get("comments", 0),
-                reposts=post.get("reposts", 0),
-            )
-            db.add(new_post)
-
-    # Сохраняем новые товары
-    for product in data["products"]:
-        if product["name"] not in existing_products:
-            new_product = Product(
-                group_id=vk_group_id,
-                name=product["name"],
-                description=product.get("description"),
-                price=product.get("price"),
-            )
-            db.add(new_product)
-
-    # Сохраняем новые услуги
-    for service in data["services"]:
-        if service["name"] not in existing_services:
-            new_service = Service(
-                group_id=vk_group_id,
-                name=service["name"],
-                description=service.get("description"),
-                price=service.get("price"),
-            )
-            db.add(new_service)
-
+    else:
+        association.last_uploaded_at = last_uploaded_at  # Обновляем дату загрузки
+    
     db.commit()
 
-    # Формируем данные для ChromaDB
-    past_posts = db.query(Post).filter(Post.group_id == vk_group_id).all()
-    post_styles = "\n\n".join([f"📝 {p.text}" for p in past_posts[-5:]]) if past_posts else "Нет записанных постов."
-
-    products_list = db.query(Product).filter(Product.group_id == vk_group_id).all()
-    services_list = db.query(Service).filter(Service.group_id == vk_group_id).all()
-
-    doc_description = f"Название группы: {group.name}\nОписание: {group.description}\nПодписчики: {group.subscribers_count}"
-    doc_products = "Товары:\n" + ("\n".join([f"{p.name} - {p.description} (Цена: {p.price})" for p in products_list]) if products_list else "Нет товаров.")
-    doc_services = "Услуги:\n" + ("\n".join([f"{s.name} - {s.description} (Цена: {s.price})" for s in services_list]) if services_list else "Нет услуг.")
-    doc_posts = "Стилизация прошлых постов:\n" + post_styles
-
-    documents = [
-        Document(page_content=doc_description, metadata={"vk_group_id": vk_group_id, "type": "description"}),
-        Document(page_content=doc_products, metadata={"vk_group_id": vk_group_id, "type": "products"}),
-        Document(page_content=doc_services, metadata={"vk_group_id": vk_group_id, "type": "services"}),
-        Document(page_content=doc_posts, metadata={"vk_group_id": vk_group_id, "type": "posts"}),
-    ]
-
-    # Сброс и добавление новых данных в ChromaDB
-    logger.info("🗑️ Очищаем данные в коллекции для группы...")
-    group_vectorstore = get_group_vectorstore(vk_group_id)
-    group_vectorstore.reset_collection()
-    group_vectorstore.add_documents(documents)
-
-    full_context = "\n\n".join([doc.page_content for doc in documents])
-    logger.info(f"✅ Данные о группе (vk_group_id={vk_group_id}) сохранены в ChromaDB!")
-    logger.info(f"📌 Сохранённый контекст:\n{full_context}")
-
+    # Возвращаем JSON с правильной датой загрузки
     return {
         "status": "success",
         "message": "✅ Данные сохранены в базе",
         "group": {
-            "id": vk_group_id,
+            "vk_group_id": vk_group_id,
             "name": group.name,
             "description": group.description,
-            "subscribers_count": group.subscribers_count
+            "category": group.category,
+            "subscribers_count": group.subscribers_count,
+            "last_uploaded_at": last_uploaded_at.isoformat()  # Дата фиксируется с таймзоной
         }
     }
 
@@ -166,8 +111,7 @@ def generate_post_from_context(db: Session, query: str, vk_group_id: int, histor
     Если поиск по запросу не возвращает документов, выполняется fallback-поиск по пустому запросу.
     """
     vectorstore = get_group_vectorstore(vk_group_id)
-    # Ищем больше документов (например, k=4) для получения контекста
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     
     try:
         results = retriever.invoke(query)
@@ -189,23 +133,45 @@ def generate_post_from_context(db: Session, query: str, vk_group_id: int, histor
     
     context_texts = "\n\n".join([doc.page_content for doc in docs if doc.page_content.strip()])
     if not context_texts.strip():
-        context_texts = "Нет данных о группе, проверьте загрузку информации."
+        context_texts = """
+        ❗ У нас нет данных о группе.  
+        Прежде чем создать рекламный пост, уточни у пользователя ключевую информацию:  
+        - О чем эта группа?  
+        - Какие товары или услуги она продвигает?  
+        - Какой стиль общения в постах предпочтителен? (формальный, дружеский, экспертный)  
+        - Есть ли примеры прошлых постов или рекламных текстов?  
+
+        Запроси только то, что критически важно для создания качественного поста.  
+        После получения данных сразу сгенерируй публикацию.
+        """
     
     prompt = f"""
-    Ты — эксперт по маркетингу. Напиши рекламный пост с учетом прошлых постов, данных о группе и истории общения.
-    
-    🔹 История общения:
+    Ты — эксперт по маркетингу и копирайтингу. Твоя задача — написать рекламный пост в стиле прошлых публикаций группы.
+
+    🔹 **История общения (для понимания предпочтений аудитории)**:  
     {history}
-    
-    🔹 Данные о группе:
+
+    🔹 **Данные о группе (важно учитывать при написании поста)**:  
     {context_texts}
-    
-    🔹 Пользователь хочет: "{query}"
-    
-    ❗ Анализируй стиль оформления прошлых постов, используй контактные данные, оформление, хештеги и тон общения.
-    ❗ Добавляй только реальные товары и услуги из списка.
-    ❗ Пиши пост без команд и пояснений, только сам текст.
+
+    🔹 **Пользователь хочет**:  
+    "{query}"
+
+    📌 **Твои задачи**:  
+    1️) **Соблюдай стиль прошлых постов**, если они есть — анализируй их структуру, тон общения, оформление, хештеги, длину и контактные данные.  
+    2️) **Если старых постов нет**, **сам определи** оптимальный объем и стиль публикации в зависимости от тематики, типа контента и целевой аудитории группы.  
+    3️) **Используй только актуальные товары и услуги** — не добавляй ничего, чего нет в группе.  
+    4️) **Делай текст живым и вовлекающим** — он должен привлекать внимание аудитории.  
+    5️) **Добавь призыв к действию** — мотивируй подписаться, купить, оставить комментарий или задать вопрос.  
+    6️) **Ориентируйся на объем прошлых постов**:  
+    - Если раньше посты были короткие, сделай краткий и лаконичный текст.  
+    - Если в группе преобладают длинные посты, пиши развернуто.  
+    - **Если старых постов нет — оцени ситуацию самостоятельно и выбери лучший вариант.**  
+    7️) **Не используй команды и пояснения** — сразу пиши готовый рекламный пост.
+
+    📣 **Генерируй пост как живой текст, будто его написал SMM-менеджер группы.**  
     """
+
     
     logger.info(f"📢 [vk_group_id={vk_group_id}] Передаем запрос в DeepSeek:\n{prompt}")
     print(prompt)  # Для отладки

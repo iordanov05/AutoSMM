@@ -1,6 +1,6 @@
 import os
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 from dotenv import load_dotenv
 
@@ -26,14 +26,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """Создаём JWT-токен"""
+    """Создаём JWT-токен с корректной UTC-датой"""
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+
+    # Устанавливаем дату истечения в UTC
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
 
-   
-    to_encode["sub"] = data["sub"]  
+    # Добавляем "sub" в токен
+    to_encode["sub"] = data["sub"]
 
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 

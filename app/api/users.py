@@ -46,8 +46,14 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
     """Авторизация пользователя"""
     user = db.query(User).filter(User.email == user_data.email).first()
+    
     if not user or not verify_password(user_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Неверный email или пароль")
     
     token = create_access_token({"sub": user.email})
-    return {"access_token": token, "token_type": "bearer"}
+    
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_name": user.username  
+    }
