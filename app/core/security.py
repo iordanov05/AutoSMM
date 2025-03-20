@@ -10,7 +10,7 @@ load_dotenv()
 # Конфиг токенов
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = 60  # Время жизни токена
+ACCESS_TOKEN_EXPIRE_HOURS = int(os.getenv("ACCESS_TOKEN_EXPIRE_HOURS"))
 
 # Контекст для хеширования паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -27,16 +27,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    """Создаём JWT-токен с корректной UTC-датой"""
+def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-
-    # Устанавливаем дату истечения в UTC
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
     to_encode.update({"exp": expire})
-
-    # Добавляем "sub" в токен
-    to_encode["sub"] = data["sub"]
 
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 

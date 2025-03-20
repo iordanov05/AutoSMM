@@ -29,38 +29,32 @@ def save_group_data(db: Session, user_id: int, data: dict):
     """
     Сохраняет данные о группе, постах, товарах и услугах в PostgreSQL и индексирует информацию в ChromaDB.
     """
-    # Получаем текущее время в UTC с учетом таймзоны
     last_uploaded_at = datetime.now(timezone.utc)
 
-    # Проверяем наличие vk_group_id
     vk_group_id = data["community"].get("id")
     if not vk_group_id:
         logger.error("Не найден vk_group_id в данных сообщества!")
         return {"status": "error", "message": "Ошибка: отсутствует vk_group_id"}
     
-    # Проверяем, существует ли группа
     group = db.query(Group).filter(Group.vk_group_id == vk_group_id).first()
 
-    # Если группы нет — создаем новую
     if not group:
         group = Group(
             vk_group_id=vk_group_id,
             name=data["community"]["name"],
             description=data["community"].get("description"),
-            category=data["community"].get("category"),  # Добавлена категория
+            category=data["community"].get("category"),
             subscribers_count=data["community"].get("subscribers_count"),
         )
         db.add(group)
         db.commit()
         db.refresh(group)
 
-    # Проверяем, есть ли связь пользователя с этой группой
     association = db.query(UserGroupAssociation).filter(
         UserGroupAssociation.user_id == user_id,
         UserGroupAssociation.vk_group_id == vk_group_id
     ).first()
 
-    # Если связи нет, создаем её и обновляем дату
     if not association:
         association = UserGroupAssociation(
             user_id=user_id,
@@ -69,11 +63,56 @@ def save_group_data(db: Session, user_id: int, data: dict):
         )
         db.add(association)
     else:
-        association.last_uploaded_at = last_uploaded_at  # Обновляем дату загрузки
-    
+        association.last_uploaded_at = last_uploaded_at
+
     db.commit()
 
-    # Возвращаем JSON с правильной датой загрузки
+    # 🚀 Сохраняем посты
+    existing_posts = {p.text for p in db.query(Post).filter(Post.group_id == vk_group_id).all()}
+    
+    for post in data["posts"]:
+        text = post["text"].strip()
+
+        if text not in existing_posts:
+            new_post = Post(
+                group_id=vk_group_id,
+                text=text,
+                likes=post.get("likes", 0),
+                comments=post.get("comments", 0),
+                reposts=post.get("reposts", 0),
+            )
+            db.add(new_post)
+
+    # ✅ **Сохраняем товары (products)**
+    existing_products = {p.name for p in db.query(Product).filter(Product.group_id == vk_group_id).all()}
+    
+    for product in data["products"]:
+        name = product["name"].strip()
+        if name not in existing_products:
+            new_product = Product(
+                group_id=vk_group_id,
+                name=name,
+                description=product.get("description", "").strip(),
+                price=product.get("price", "Не указано")
+            )
+            db.add(new_product)
+
+    # ✅ **Сохраняем услуги (services)**
+    existing_services = {s.name for s in db.query(Service).filter(Service.group_id == vk_group_id).all()}
+    
+    for service in data["services"]:
+        name = service["name"].strip()
+        if name not in existing_services:
+            new_service = Service(
+                group_id=vk_group_id,
+                name=name,
+                description=service.get("description", "").strip(),
+                price=service.get("price", "Не указано")
+            )
+            db.add(new_service)
+
+    db.commit()
+
     return {
         "status": "success",
         "message": "✅ Данные сохранены в базе",
@@ -83,9 +122,10 @@ def save_group_data(db: Session, user_id: int, data: dict):
             "description": group.description,
             "category": group.category,
             "subscribers_count": group.subscribers_count,
-            "last_uploaded_at": last_uploaded_at.isoformat()  # Дата фиксируется с таймзоной
+            "last_uploaded_at": last_uploaded_at.isoformat()
         }
     }
+
 
 def get_group_vectorstore(vk_group_id: int) -> Chroma:
     """

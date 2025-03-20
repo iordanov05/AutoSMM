@@ -11,21 +11,11 @@ from selenium.webdriver.chrome.service import Service
 from app.core.config import ACCESS_TOKEN, API_VERSION
 
 
-
 def get_community_data(community_link: str) -> dict:
     community_id = get_community_id_from_link(community_link)
     if not community_id:
         return None
-    community_info = get_community_info(community_id)
-    posts = get_community_posts(community_id)
-    products = parse_market_with_selenium(community_id)
-    services = parse_services_with_selenium(community_id)
-    return {
-        'community': community_info,
-        'posts': posts,
-        'products': products,
-        'services': services
-    }
+    return get_community_data_by_id(community_id)
 
 
 def get_community_data_by_id(community_id: int) -> dict:
@@ -33,20 +23,15 @@ def get_community_data_by_id(community_id: int) -> dict:
     Получает данные о сообществе ВКонтакте, используя его ID.
     """
     community_info = get_community_info(community_id)
-    posts = get_community_posts(community_id)
-    products = parse_market_with_selenium(community_id)
-    services = parse_services_with_selenium(community_id)
-
     if not community_info:
         return None  # Если сообщество не найдено, ничего не возвращаем
 
     return {
         'community': community_info,
-        'posts': posts,
-        'products': products,
-        'services': services
+        'posts': get_community_posts(community_id),
+        'products': parse_market_with_selenium(community_id),
+        'services': parse_services_with_selenium(community_id)
     }
-
 
 
 def get_driver():
@@ -57,6 +42,7 @@ def get_driver():
     options.add_argument("--disable-blink-features=AutomationControlled")
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
+
 
 def get_community_id_from_link(community_link: str) -> str:
     match = re.search(r"vk\.com/([\w\d_.-]+)", community_link)
@@ -81,6 +67,7 @@ def get_community_id_from_link(community_link: str) -> str:
     print("Ошибка: Сообщество не найдено.")
     return None
 
+
 def get_community_info(community_id: str) -> dict:
     url = 'https://api.vk.com/method/groups.getById'
     params = {
@@ -94,8 +81,6 @@ def get_community_info(community_id: str) -> dict:
         print(f"Ошибка при получении информации о сообществе: {response['error']['error_msg']}")
         return None
     community_data = response['response'][0]
-    # Добавляем id в информацию о сообществе
-    community_data["id"] = community_id
     return {
         'id': community_id,
         'name': community_data['name'],
@@ -112,30 +97,59 @@ def get_community_posts(community_id: str) -> list:
         'count': 20
     }
     response = requests.get(url, params=params).json()
+
     if 'error' in response:
         print(f"Ошибка при получении постов: {response['error']['error_msg']}")
         return []
+
     posts = response['response']['items']
-    two_weeks_ago = datetime.now() - timedelta(days=30)
+    month_ago = datetime.now() - timedelta(days=30)
     filtered_posts = []
+
     for post in posts:
         post_date = datetime.fromtimestamp(post['date'])
-        if post_date >= two_weeks_ago:
-            filtered_posts.append({
-                'date': post_date.isoformat(),
-                'text': post['text'],
-                'hashtags': [tag for tag in post['text'].split() if tag.startswith('#')],
-                'likes': post['likes']['count'],
-                'comments': post['comments']['count'],
-                'reposts': post['reposts']['count']
-            })
+        if post_date < month_ago:
+            continue  # Пропускаем старые посты
+
+        text = post.get('text', '').strip()
+        has_attachments = 'attachments' in post
+
+        # 1️⃣ Обрабатываем репосты
+        if 'copy_history' in post:
+            text = "[Репост другого поста]"
+
+        # 2️⃣ Обрабатываем посты без текста, но с медиа
+        elif not text and has_attachments:
+            attachments = post['attachments']
+            if any(att['type'] == 'photo' for att in attachments):
+                text = "[Пост без текста: изображение]"
+            elif any(att['type'] == 'video' for att in attachments):
+                text = "[Пост без текста: видео]"
+            else:
+                text = "[Пост без текста]"
+
+        # 3️⃣ Если пост абсолютно пуст (без текста и медиа) – пропускаем
+        elif not text:
+            continue
+
+        filtered_posts.append({
+            'date': post_date.isoformat(),
+            'text': text,
+            'hashtags': [tag for tag in text.split() if tag.startswith('#')],
+            'likes': post.get('likes', {}).get('count', 0),
+            'comments': post.get('comments', {}).get('count', 0),
+            'reposts': post.get('reposts', {}).get('count', 0)
+        })
+
     return filtered_posts
+
 
 def parse_market_with_selenium(group_id: str) -> list:
     driver = get_driver()
     try:
         community_url = f'https://vk.com/market-{group_id}?screen=group'
         driver.get(community_url)
+
         try:
             WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "market_row"))
@@ -143,9 +157,11 @@ def parse_market_with_selenium(group_id: str) -> list:
         except Exception:
             print("Нет товаров")
             return []
+
+        products = []
         links = [item.find_element(By.TAG_NAME, 'a').get_attribute('href')
                  for item in driver.find_elements(By.CLASS_NAME, "market_row")]
-        products = []
+
         for link in links[:15]:
             driver.get(link)
             try:
@@ -162,15 +178,18 @@ def parse_market_with_selenium(group_id: str) -> list:
                 })
             except Exception as e:
                 print(f"Ошибка при сборе данных: {e}")
+
         return products
     finally:
         driver.quit()
+
 
 def parse_services_with_selenium(group_id: str) -> list:
     driver = get_driver()
     try:
         community_url = f'https://vk.com/uslugi-{group_id}?screen=group'
         driver.get(community_url)
+
         try:
             WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "market_row"))
@@ -178,9 +197,11 @@ def parse_services_with_selenium(group_id: str) -> list:
         except Exception:
             print("Нет услуг")
             return []
+
+        services = []
         links = [item.find_element(By.TAG_NAME, 'a').get_attribute('href')
                  for item in driver.find_elements(By.CLASS_NAME, "market_row")]
-        services = []
+
         for link in links[:15]:
             driver.get(link)
             try:
@@ -197,7 +218,7 @@ def parse_services_with_selenium(group_id: str) -> list:
                 })
             except Exception as e:
                 print(f"Ошибка при сборе данных: {e}")
+
         return services
     finally:
         driver.quit()
-
