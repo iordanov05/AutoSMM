@@ -18,7 +18,7 @@ ALGORITHM = os.getenv("ALGORITHM")
 # Получаем API-ключ DeepSeek
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL")
+AI_MODEL = os.getenv("AI_MODEL")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 # Формируем строку подключения
 DATABASE_URL = f"postgresql+psycopg2://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"

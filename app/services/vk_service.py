@@ -11,6 +11,44 @@ from selenium.webdriver.chrome.service import Service
 from app.core.config import ACCESS_TOKEN, API_VERSION
 
 
+
+def get_community_data(community_link: str) -> dict:
+    community_id = get_community_id_from_link(community_link)
+    if not community_id:
+        return None
+    community_info = get_community_info(community_id)
+    posts = get_community_posts(community_id)
+    products = parse_market_with_selenium(community_id)
+    services = parse_services_with_selenium(community_id)
+    return {
+        'community': community_info,
+        'posts': posts,
+        'products': products,
+        'services': services
+    }
+
+
+def get_community_data_by_id(community_id: int) -> dict:
+    """
+    Получает данные о сообществе ВКонтакте, используя его ID.
+    """
+    community_info = get_community_info(community_id)
+    posts = get_community_posts(community_id)
+    products = parse_market_with_selenium(community_id)
+    services = parse_services_with_selenium(community_id)
+
+    if not community_info:
+        return None  # Если сообщество не найдено, ничего не возвращаем
+
+    return {
+        'community': community_info,
+        'posts': posts,
+        'products': products,
+        'services': services
+    }
+
+
+
 def get_driver():
     options = webdriver.ChromeOptions()
     options.add_argument('--headless')  # Без UI
@@ -163,17 +201,3 @@ def parse_services_with_selenium(group_id: str) -> list:
     finally:
         driver.quit()
 
-def get_community_data(community_link: str) -> dict:
-    community_id = get_community_id_from_link(community_link)
-    if not community_id:
-        return None
-    community_info = get_community_info(community_id)
-    posts = get_community_posts(community_id)
-    products = parse_market_with_selenium(community_id)
-    services = parse_services_with_selenium(community_id)
-    return {
-        'community': community_info,
-        'posts': posts,
-        'products': products,
-        'services': services
-    }

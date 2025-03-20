@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.core.db import get_db
@@ -9,6 +9,8 @@ from app.models.user_group_association import UserGroupAssociation
 from app.api.auth import get_current_user
 from pydantic import BaseModel
 from datetime import datetime
+
+
 
 router = APIRouter()
 
@@ -59,3 +61,32 @@ def get_user_groups(
         )
         for g in groups
     ]
+
+
+
+@router.delete("/user_groups/{vk_group_id}")
+def delete_user_group_association(
+    vk_group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Удаляет связь пользователя и группы ВКонтакте.
+    Если у группы больше нет пользователей, она автоматически удаляется (см. SQLAlchemy event).
+    """
+    user_id = current_user.id
+
+    # Проверяем, есть ли связь пользователя с этой группой
+    association = db.query(UserGroupAssociation).filter(
+        UserGroupAssociation.user_id == user_id,
+        UserGroupAssociation.vk_group_id == vk_group_id
+    ).first()
+
+    if not association:
+        raise HTTPException(status_code=404, detail="Связь пользователя с группой не найдена")
+
+    # Удаляем связь
+    db.delete(association)
+    db.commit()
+
+    return {"message": f"Пользователь {user_id} успешно отвязан от группы {vk_group_id}"}

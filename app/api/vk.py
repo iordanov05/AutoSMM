@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from app.services.vk_service import get_community_data
+from app.services.vk_service import get_community_data, get_community_data_by_id
 from app.services.rag import save_group_data
 from app.core.db import get_db
 from app.models.user import User
@@ -26,4 +26,20 @@ def parse_and_save_vk(
     # Функция сохранения ожидает, что в data["community"] присутствует поле "id"
     if "id" not in data["community"]:
         raise HTTPException(status_code=400, detail="Не удалось определить ID сообщества")
+    return save_group_data(db, current_user.id, data)
+
+
+@router.post("/update_community_data")
+def update_community_data(
+    community_id: int = Query(..., description="ID сообщества ВКонтакте"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Обновляет данные сообщества ВКонтакте по его ID и сохраняет их в базу.
+    """
+    data = get_community_data_by_id(community_id)
+    if not data:
+        raise HTTPException(status_code=400, detail="Не удалось получить данные из сообщества")
+
     return save_group_data(db, current_user.id, data)

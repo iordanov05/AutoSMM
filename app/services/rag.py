@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from app.models.user_group_association import UserGroupAssociation
-from app.core.config import CHROMA_DB_PATH, DEEPSEEK_MODEL, OPENROUTER_API_KEY
+from app.core.config import CHROMA_DB_PATH, AI_MODEL, OPENROUTER_API_KEY
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 llm = ChatOpenAI(
     openai_api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
-    model_name=DEEPSEEK_MODEL,
+    model_name=AI_MODEL,
     temperature=0.5,
     max_tokens=3000
 )
@@ -167,13 +167,13 @@ def generate_post_from_context(db: Session, query: str, vk_group_id: int, histor
     - Если раньше посты были короткие, сделай краткий и лаконичный текст.  
     - Если в группе преобладают длинные посты, пиши развернуто.  
     - **Если старых постов нет — оцени ситуацию самостоятельно и выбери лучший вариант.**  
-    7️) **Не используй команды и пояснения** — сразу пиши готовый рекламный пост.
+    7️) **Не используй команды и пояснения, не расписывай свои шаги** — сразу пиши готовый рекламный пост.
 
     📣 **Генерируй пост как живой текст, будто его написал SMM-менеджер группы.**  
     """
 
     
-    logger.info(f"📢 [vk_group_id={vk_group_id}] Передаем запрос в DeepSeek:\n{prompt}")
-    print(prompt)  # Для отладки
+    logger.info(f"📢 [vk_group_id={vk_group_id}] Передаем запрос в {AI_MODEL}:\n{prompt}")
+
     response = llm.invoke(prompt)
     return response.content.strip()
