@@ -1,28 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.core.db import get_db
-from app.services.rag import generate_post_from_context
-from app.models.user import User
-from app.models.group import Group  
+from app.services.rag import generate_post_from_context, generate_ideas_for_group, generate_growth_plan_for_group
 from app.api.auth import get_current_user
 
 router = APIRouter()
-
-# @router.post("/generate")
-# def generate_post(
-#     user_query: str = Query(..., description="Запрос пользователя для генерации поста"),
-#     db: Session = Depends(get_db),
-#     current_user: User = Depends(get_current_user)
-# ):
-#     """
-#     Генерирует новый пост на основе данных о группе и пожеланий пользователя.
-#     """
-#     user_group = db.query(Group).filter(Group.user_id == current_user.id).first()
-#     if not user_group:
-#         raise HTTPException(status_code=404, detail="Группа не найдена")
-
-#     # Генерируем пост без истории (history можно передать пустой строкой)
-#     return {"generated_post": generate_post_from_context(db, user_query, user_group.id, history="")}
 
 # Вспомогательное хранилище диалогов для WebSocket (в памяти)
 user_sessions = {}
@@ -31,20 +13,18 @@ user_sessions = {}
 async def websocket_endpoint(websocket: WebSocket, group_id: int, db: Session = Depends(get_db)):
     """
     WebSocket-соединение для общения с ботом.
-    Информация о пользователе извлекается из токена.
+    Токен пользователя передаётся через query (?token=...).
     """
-    # Извлекаем токен из заголовка Authorization
-    auth_header = websocket.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        await websocket.close(code=1008)
+    # 👉 Получаем токен из query параметров
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)  # Policy Violation
         return
-
-    token = auth_header.split(" ")[1]
 
     try:
         current_user = get_current_user(token=token, db=db)
-    except Exception as e:
-        await websocket.close(code=4403)
+    except Exception:
+        await websocket.close(code=4403)  # Forbidden
         return
 
     user_id = current_user.id
@@ -57,12 +37,26 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int, db: Session = 
     try:
         while True:
             message = await websocket.receive_text()
-            # Добавляем новое сообщение в историю диалога
+
+            # Обработка спец-команды "Придумай сам"
+            if message == "auto_idea":
+                result = generate_ideas_for_group(db, group_id)
+                user_sessions[session_key] += f"\nAssistant: {result}"
+                await websocket.send_text(result)
+                continue
+            
+            if message == "growth_plan":
+                result = generate_growth_plan_for_group(db, group_id)
+                user_sessions[session_key] += f"\nAssistant: {result}"
+                await websocket.send_text(result)
+                continue
+
+
+            # 🧠 Обычное взаимодействие
             user_sessions[session_key] += f"\nUser: {message}"
             response = generate_post_from_context(db, message, group_id, history=user_sessions[session_key])
             user_sessions[session_key] += f"\nAssistant: {response}"
             await websocket.send_text(response)
-    except WebSocketDisconnect:
-        # Можно добавить логирование отключения
-        pass
 
+    except WebSocketDisconnect:
+        pass
