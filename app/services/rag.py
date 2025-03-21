@@ -5,18 +5,15 @@ from app.models.post import Post
 from app.models.group import Group
 from app.models.product import Product
 from app.models.service import Service
+from app.models.user_group_association import UserGroupAssociation
+from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.documents import Document
-from app.models.user_group_association import UserGroupAssociation
 from app.core.config import CHROMA_DB_PATH, AI_MODEL, OPENROUTER_API_KEY
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация LLM
 llm = ChatOpenAI(
     openai_api_key=OPENROUTER_API_KEY,
     base_url="https://openrouter.ai/api/v1",
@@ -25,112 +22,7 @@ llm = ChatOpenAI(
     max_tokens=3000
 )
 
-def save_group_data(db: Session, user_id: int, data: dict):
-    """
-    Сохраняет данные о группе, постах, товарах и услугах в PostgreSQL и индексирует информацию в ChromaDB.
-    """
-    last_uploaded_at = datetime.now(timezone.utc)
-
-    vk_group_id = data["community"].get("id")
-    if not vk_group_id:
-        logger.error("Не найден vk_group_id в данных сообщества!")
-        return {"status": "error", "message": "Ошибка: отсутствует vk_group_id"}
-    
-    group = db.query(Group).filter(Group.vk_group_id == vk_group_id).first()
-
-    if not group:
-        group = Group(
-            vk_group_id=vk_group_id,
-            name=data["community"]["name"],
-            description=data["community"].get("description"),
-            category=data["community"].get("category"),
-            subscribers_count=data["community"].get("subscribers_count"),
-        )
-        db.add(group)
-        db.commit()
-        db.refresh(group)
-
-    association = db.query(UserGroupAssociation).filter(
-        UserGroupAssociation.user_id == user_id,
-        UserGroupAssociation.vk_group_id == vk_group_id
-    ).first()
-
-    if not association:
-        association = UserGroupAssociation(
-            user_id=user_id,
-            vk_group_id=vk_group_id,
-            last_uploaded_at=last_uploaded_at
-        )
-        db.add(association)
-    else:
-        association.last_uploaded_at = last_uploaded_at
-
-    db.commit()
-
-    # 🚀 Сохраняем посты
-    existing_posts = {p.text for p in db.query(Post).filter(Post.group_id == vk_group_id).all()}
-    
-    for post in data["posts"]:
-        text = post["text"].strip()
-
-        if text not in existing_posts:
-            new_post = Post(
-                group_id=vk_group_id,
-                text=text,
-                likes=post.get("likes", 0),
-                comments=post.get("comments", 0),
-                reposts=post.get("reposts", 0),
-            )
-            db.add(new_post)
-
-    # ✅ **Сохраняем товары (products)**
-    existing_products = {p.name for p in db.query(Product).filter(Product.group_id == vk_group_id).all()}
-    
-    for product in data["products"]:
-        name = product["name"].strip()
-        if name not in existing_products:
-            new_product = Product(
-                group_id=vk_group_id,
-                name=name,
-                description=product.get("description", "").strip(),
-                price=product.get("price", "Не указано")
-            )
-            db.add(new_product)
-
-    # ✅ **Сохраняем услуги (services)**
-    existing_services = {s.name for s in db.query(Service).filter(Service.group_id == vk_group_id).all()}
-    
-    for service in data["services"]:
-        name = service["name"].strip()
-        if name not in existing_services:
-            new_service = Service(
-                group_id=vk_group_id,
-                name=name,
-                description=service.get("description", "").strip(),
-                price=service.get("price", "Не указано")
-            )
-            db.add(new_service)
-
-    db.commit()
-
-    return {
-        "status": "success",
-        "message": "✅ Данные сохранены в базе",
-        "group": {
-            "vk_group_id": vk_group_id,
-            "name": group.name,
-            "description": group.description,
-            "category": group.category,
-            "subscribers_count": group.subscribers_count,
-            "last_uploaded_at": last_uploaded_at.isoformat()
-        }
-    }
-
-
 def get_group_vectorstore(vk_group_id: int) -> Chroma:
-    """
-    Создает и возвращает экземпляр ChromaDB для сообщества с уникальным именем коллекции, основанным на vk_group_id.
-    """
     collection_name = f"group_{vk_group_id}"
     vectorstore = Chroma(
         persist_directory=CHROMA_DB_PATH,
@@ -138,12 +30,118 @@ def get_group_vectorstore(vk_group_id: int) -> Chroma:
         embedding_function=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     )
     try:
-        # Проверяем, существует ли коллекция
         vectorstore.get()
     except ValueError:
         logger.warning(f"⚠️ Коллекция {collection_name} не найдена! Создаем новую...")
         vectorstore.reset_collection()
     return vectorstore
+
+
+def save_group_data(db: Session, user_id: int, data: dict):
+    vk_group_id = data["community"].get("id")
+    if not vk_group_id:
+        logger.error("❌ Не найден vk_group_id в данных сообщества!")
+        return {"status": "error", "message": "Ошибка: отсутствует vk_group_id"}
+
+    last_uploaded_at = datetime.now(timezone.utc)
+
+    # 🔁 Обновление или создание группы
+    group = db.query(Group).filter(Group.vk_group_id == vk_group_id).first()
+    if not group:
+        group = Group(vk_group_id=vk_group_id)
+        db.add(group)
+
+    group.name = data["community"]["name"]
+    group.description = data["community"].get("description")
+    group.subscribers_count = data["community"].get("subscribers_count")
+    db.commit()
+    db.refresh(group)
+
+    # 🔁 Обновление связи пользователя и группы
+    association = db.query(UserGroupAssociation).filter(
+        UserGroupAssociation.user_id == user_id,
+        UserGroupAssociation.vk_group_id == vk_group_id
+    ).first()
+    if not association:
+        association = UserGroupAssociation(user_id=user_id, vk_group_id=vk_group_id)
+        db.add(association)
+    association.last_uploaded_at = last_uploaded_at
+    db.commit()
+
+    # ❌ Удаляем старые посты/товары/услуги
+    db.query(Post).filter(Post.group_id == vk_group_id).delete()
+    db.query(Product).filter(Product.group_id == vk_group_id).delete()
+    db.query(Service).filter(Service.group_id == vk_group_id).delete()
+    db.commit()
+
+    # ✅ Добавляем посты
+    for post in data["posts"]:
+        db.add(Post(
+            group_id=vk_group_id,
+            text=post["text"].strip(),
+            likes=post.get("likes", 0),
+            comments=post.get("comments", 0),
+            reposts=post.get("reposts", 0)
+        ))
+
+    # ✅ Добавляем товары
+    for product in data["products"]:
+        db.add(Product(
+            group_id=vk_group_id,
+            name=product["name"].strip(),
+            description=product.get("description", "").strip(),
+            price=product.get("price", "Не указано")
+        ))
+
+    # ✅ Добавляем услуги
+    for service in data["services"]:
+        db.add(Service(
+            group_id=vk_group_id,
+            name=service["name"].strip(),
+            description=service.get("description", "").strip(),
+            price=service.get("price", "Не указано")
+        ))
+
+    db.commit()
+
+    # 🧠 Обновляем ChromaDB
+    logger.info("🧠 Обновляем коллекцию ChromaDB для группы...")
+    vectorstore = get_group_vectorstore(vk_group_id)
+    vectorstore.reset_collection()
+
+    # 📄 Собираем документы
+    posts = db.query(Post).filter(Post.group_id == vk_group_id).all()
+    products = db.query(Product).filter(Product.group_id == vk_group_id).all()
+    services = db.query(Service).filter(Service.group_id == vk_group_id).all()
+
+    doc_description = f"Название группы: {group.name}\nОписание: {group.description}\nПодписчики: {group.subscribers_count}"
+    doc_products = "Товары:\n" + "\n".join([f"{p.name} - {p.description} (Цена: {p.price})" for p in products]) if products else "Нет товаров."
+    doc_services = "Услуги:\n" + "\n".join([f"{s.name} - {s.description} (Цена: {s.price})" for s in services]) if services else "Нет услуг."
+    doc_posts = "Примеры постов:\n" + "\n\n".join([f"📝 {p.text}" for p in posts[-5:]]) if posts else "Нет постов."
+
+    documents = [
+        Document(page_content=doc_description, metadata={"type": "description", "vk_group_id": vk_group_id}),
+        Document(page_content=doc_products, metadata={"type": "products", "vk_group_id": vk_group_id}),
+        Document(page_content=doc_services, metadata={"type": "services", "vk_group_id": vk_group_id}),
+        Document(page_content=doc_posts, metadata={"type": "posts", "vk_group_id": vk_group_id}),
+    ]
+
+    vectorstore.add_documents(documents)
+
+    logger.info(f"✅ Данные о группе {vk_group_id} сохранены в PostgreSQL и ChromaDB.")
+
+    return {
+        "status": "success",
+        "message": "✅ Данные обновлены и сохранены",
+        "group": {
+            "id": vk_group_id,
+            "name": group.name,
+            "description": group.description,
+            "subscribers_count": group.subscribers_count,
+            "last_uploaded_at": last_uploaded_at.isoformat()
+        }
+    }
+
 
 def generate_post_from_context(db: Session, query: str, vk_group_id: int, history: str = "") -> str:
     """

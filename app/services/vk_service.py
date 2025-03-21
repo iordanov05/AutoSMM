@@ -1,7 +1,7 @@
 # app/services/vk_service.py
 import re
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -87,14 +87,15 @@ def get_community_info(community_id: str) -> dict:
         'description': community_data.get('description', ''),
         'subscribers_count': community_data.get('members_count', 0)
     }
-
+    
+    
 def get_community_posts(community_id: str) -> list:
     url = 'https://api.vk.com/method/wall.get'
     params = {
         'access_token': ACCESS_TOKEN,
         'v': API_VERSION,
         'owner_id': f'-{community_id}',
-        'count': 20
+        'count': 15  #  Берем всегда последние 15 постов
     }
     response = requests.get(url, params=params).json()
 
@@ -103,14 +104,10 @@ def get_community_posts(community_id: str) -> list:
         return []
 
     posts = response['response']['items']
-    month_ago = datetime.now() - timedelta(days=30)
     filtered_posts = []
 
     for post in posts:
         post_date = datetime.fromtimestamp(post['date'])
-        if post_date < month_ago:
-            continue  # Пропускаем старые посты
-
         text = post.get('text', '').strip()
         has_attachments = 'attachments' in post
 
@@ -118,7 +115,7 @@ def get_community_posts(community_id: str) -> list:
         if 'copy_history' in post:
             text = "[Репост другого поста]"
 
-        # 2️⃣ Обрабатываем посты без текста, но с медиа
+        # 2️⃣ Пост без текста, но с медиа
         elif not text and has_attachments:
             attachments = post['attachments']
             if any(att['type'] == 'photo' for att in attachments):
@@ -128,7 +125,7 @@ def get_community_posts(community_id: str) -> list:
             else:
                 text = "[Пост без текста]"
 
-        # 3️⃣ Если пост абсолютно пуст (без текста и медиа) – пропускаем
+        # 3️⃣ Абсолютно пустой пост — пропускаем
         elif not text:
             continue
 
