@@ -10,4 +10,4 @@ class UserGroupAssociation(Base):
     last_uploaded_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", back_populates="user_group_associations")
-    group = relationship("Group", back_populates="user_associations")  # Должно совпадать с group.py!
+    group = relationship("Group", back_populates="user_associations") 

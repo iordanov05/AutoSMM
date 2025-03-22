@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 from app.core.db import get_db
-from app.services.rag import generate_post_from_context, generate_ideas_for_group, generate_growth_plan_for_group
+from app.services.generator import generate_post_from_context, generate_ideas_for_group, generate_growth_plan_for_group
 from app.api.auth import get_current_user
 
 router = APIRouter()
