@@ -16,7 +16,6 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM")
 
 # Получаем API-ключ DeepSeek
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH")
 AI_MODEL = os.getenv("AI_MODEL")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")

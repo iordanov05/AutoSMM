@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    container_name: autosmm_backend
+    env_file: .env
+    ports:
+      - "8855:8855"
+    depends_on:
+      - db
+    restart: always
+    mem_limit: 512m
+    cpus: "0.7"
+    volumes:
+      - .:/app
+
+  db:
+    image: postgres:16
+    container_name: autosmm_db
+    restart: always
+    environment:
+      POSTGRES_DB: autosmm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    mem_limit: 768m
+
+volumes:
+  pgdata:
